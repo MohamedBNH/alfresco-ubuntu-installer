@@ -79,7 +79,7 @@ install_postgresql() {
     
     # Install PostgreSQL
     log_info "Installing PostgreSQL packages..."
-    sudo apt-get install -y "postgresql-${POSTGRESQL_VERSION}" postgresql-contrib
+    sudo apt-get install -y "postgresql-${POSTGRESQL_VERSION}" postgresql-contrib zip unzip
     
     log_info "PostgreSQL ${POSTGRESQL_VERSION} installed successfully"
 }
