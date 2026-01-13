@@ -1,18 +1,16 @@
 #!/bin/bash
 # =============================================================================
-# Alfresco Resources Download Script
-# =============================================================================
-# Downloads Alfresco distribution packages from Nexus repository.
-#
+# Download & Install Alfresco Governance Services Distribution Script
+# =============================================================================#
 # Components downloaded:
-# - Alfresco Content Services Community Distribution (ZIP)
+# - Alfresco Governance Services Distribution (ZIP)
 #
 # Prerequisites:
 # - Run 00-generate-config.sh first to create configuration
 # - Internet connectivity to nexus.alfresco.com
 #
 # Usage:
-#   bash scripts/05-download_alfresco_resources.sh
+#   bash scripts/install_rm.sh
 # =============================================================================
 
 # Load common functions and configuration
@@ -31,7 +29,7 @@ NEXUS_DOWNLOAD_URL="${NEXUS_BASE_URL}/repository/releases/org/alfresco"
 # Main
 # -----------------------------------------------------------------------------
 main() {
-    log_step "Starting Alfresco resources download..."
+    log_step "Starting install Alfresco Governance Services..."
     
     # Pre-flight checks
     load_config
@@ -40,18 +38,24 @@ main() {
     # Determine versions
     determine_versions
     
+    check_amp_installed
+    
     # Create download directory
     create_download_directory
     
     # Download components
     download_alfresco_rm_distribution
 
-    extract_alfresco_distribution
-    
     # Verify downloads
     verify_downloads
+
+    #extract zip file
+    extract_alfresco_distribution
+
+    #copy and install amps
+    insatll_amps_file
     
-    log_info "All Alfresco resources downloaded successfully!"
+    log_info "Alfresco Governance Services successfully installed!"
 }
 
 # -----------------------------------------------------------------------------
@@ -176,36 +180,30 @@ download_alfresco_rm_distribution() {
 }
 
 # -----------------------------------------------------------------------------
-# Extract Alfresco Governance Distribution
+# Check if an AMP is already installed in a WAR
 # -----------------------------------------------------------------------------
-extract_alfresco_distribution() {
-    log_step "Extracting Governance distribution..."
+check_amp_installed() {
+    local tomcat_home="${ALFRESCO_HOME}/tomcat"
+    local amp_pattern="Governance Services"
+    local war_file="$tomcat_home/webapps/alfresco.war"
 
-    local dist_file
-    dist_file=$(find "$DOWNLOAD_DIR" -name "alfresco-governance-services-community-distribution-*.zip" | head -1)
+    log_info "Checking Governance Services AMP installation in ${war_file}..."
 
-    if [ -z "$dist_file" ] || [ ! -f "$dist_file" ]; then
-        log_error "Alfresco Governance distribution not found in $DOWNLOAD_DIR"
-        exit 1
+    if [ ! -f "$war_file" ]; then
+        log_warn "WAR file not found: $war_file"
+        return 2
     fi
 
-    # Create a unique, user-owned temp directory to avoid sudo ownership problems
-    TEMP_DIR="$(mktemp -d -t alfresco-install-XXXXXX)"
-    log_info "Using temp directory: $TEMP_DIR"
-
-    log_info "Extracting $(basename "$dist_file")..."
-    unzip -q "$dist_file" -d "$TEMP_DIR"
-
-    # Find the extracted directory (may have version in name)
-    ALFRESCO_DIST_DIR=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "alfresco-content-*" | head -1)
-
-    if [ -z "$ALFRESCO_DIST_DIR" ]; then
-        # Files might be directly in TEMP_DIR
-        ALFRESCO_DIST_DIR="$TEMP_DIR"
+    if java -jar "${ALFRESCO_HOME}/bin/alfresco-mmt.jar" list "$war_file" \
+        | grep -qi "$amp_pattern"; then
+        log_error "AMP Governance Services already installed"
+        return 1
+    else
+        log_info "AMP Governance Services NOT installed"
+        return 0
     fi
-
-    log_info "Distribution extracted to: $ALFRESCO_DIST_DIR"
 }
+
 
 # -----------------------------------------------------------------------------
 # Verify Downloads
@@ -272,30 +270,90 @@ verify_downloads() {
 }
 
 # -----------------------------------------------------------------------------
-# Create Download Manifest
+# Extract Alfresco Governance Distribution
 # -----------------------------------------------------------------------------
-create_manifest() {
-    local manifest_file="${DOWNLOAD_DIR}/MANIFEST.txt"
-    
-    cat << EOF > "$manifest_file"
-# Alfresco Resources Download Manifest
-# Generated: $(date)
-# 
-# This file documents the versions of Alfresco components downloaded.
-# Keep this file for reference during troubleshooting.
+extract_alfresco_distribution() {
+    log_step "Extracting Governance distribution..."
 
-Alfresco Governance Services: ${ALFRESCO_VERSION_ACTUAL}
+    local dist_file
+    dist_file=$(find "$DOWNLOAD_DIR" -name "alfresco-governance-services-community-distribution-*.zip" | head -1)
 
-Files:
-$(find "${DOWNLOAD_DIR}" -maxdepth 1 \( -name "*.zip" -o -name "*.jar" \) -exec ls -lh {} \; 2>/dev/null | awk '{print "  " $NF " (" $5 ")"}')
+    if [ -z "$dist_file" ] || [ ! -f "$dist_file" ]; then
+        log_error "Alfresco Governance distribution not found in $DOWNLOAD_DIR"
+        exit 1
+    fi
 
-Pinned versions from config/versions.conf:
-  ALFRESCO_VERSION=${ALFRESCO_VERSION}
-  USE_LATEST_VERSIONS=${USE_LATEST_VERSIONS:-false}
-EOF
-    
-    log_info "Created manifest: $manifest_file"
+    # Create a unique, user-owned temp directory to avoid sudo ownership problems
+    TEMP_DIR="$(mktemp -d -t alfresco-install-XXXXXX)"
+    log_info "Using temp directory: $TEMP_DIR"
+
+    log_info "Extracting $(basename "$dist_file")..."
+    unzip -q "$dist_file" -d "$TEMP_DIR"
+
+    # Find the extracted directory (may have version in name)
+    ALFRESCO_DIST_DIR=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "alfresco-content-*" | head -1)
+
+    if [ -z "$ALFRESCO_DIST_DIR" ]; then
+        # Files might be directly in TEMP_DIR
+        ALFRESCO_DIST_DIR="$TEMP_DIR"
+    fi
+
+    log_info "Distribution extracted to: $ALFRESCO_DIST_DIR"
 }
+
+
+
+insatll_amps_file() {
+    log_step "stop services"
+    
+    local errors=0
+    
+    
+    sudo systemctl stop solr
+    sudo systemctl stop tomcat
+    
+    
+    # Verify stopped
+    if ! systemctl is-active --quiet "tomcat"; then
+        log_info "tomcat stopped successfully"
+    else
+        log_info "tomcat still running"
+        sudo systemctl kill -s SIGKILL "tomcat" 2>/dev/null || true
+    fi
+    
+    local tomcat_home="${ALFRESCO_HOME}/tomcat"
+    local repo_amp
+    repo_amp=$(find "$ALFRESCO_DIST_DIR" -name "alfresco-governance-services-community-repo-*.amp" | head -1)
+    local share_amp
+    share_amp=$(find "$ALFRESCO_DIST_DIR" -name "alfresco-governance-services-community-share-*.amp" | head -1)
+    
+    if [ -z "$repo_amp" ]; then
+        log_error "AMP file not found in distribution"
+        exit 1
+    fi
+    if [ -z "$share_amp" ]; then
+        log_error "AMP share file not found in distribution"
+        exit 1
+    fi
+    log_info "Copy AMP file "$repo_amp" to "${ALFRESCO_HOME}"/amps/"
+    sudo cp "$repo_amp" "${ALFRESCO_HOME}/amps/"
+    sudo cp "$share_amp" "${ALFRESCO_HOME}/amps_share/"
+    
+    
+    log_step "start install"
+    java -jar "${ALFRESCO_HOME}/bin/alfresco-mmt.jar" install "$repo_amp" "$tomcat_home/webapps/alfresco.war"
+    java -jar "${ALFRESCO_HOME}/bin/alfresco-mmt.jar" install "$share_amp" "$tomcat_home/webapps/share.war"
+
+    log_step "verify install"
+    java -jar "${ALFRESCO_HOME}/bin/alfresco-mmt.jar" list "$tomcat_home/webapps/alfresco.war"
+    java -jar "${ALFRESCO_HOME}/bin/alfresco-mmt.jar" list "$tomcat_home/webapps/share.war"
+    
+    log_step "start services"
+    
+    sudo systemctl start solr
+    sudo systemctl start tomcat
+}
+
 
 # -----------------------------------------------------------------------------
 # Run Main
