@@ -45,6 +45,8 @@ main() {
     
     # Download components
     download_alfresco_rm_distribution
+
+    extract_alfresco_distribution
     
     # Verify downloads
     verify_downloads
@@ -154,7 +156,7 @@ download_file() {
 }
 
 # -----------------------------------------------------------------------------
-# Download Alfresco Content Services Distribution
+# Download Alfresco Governance Services Distribution
 # -----------------------------------------------------------------------------
 download_alfresco_rm_distribution() {
     log_step "Downloading Alfresco Governance Services Community Distribution..."
@@ -173,6 +175,37 @@ download_alfresco_rm_distribution() {
     # File downloaded successfully    
 }
 
+# -----------------------------------------------------------------------------
+# Extract Alfresco Governance Distribution
+# -----------------------------------------------------------------------------
+extract_alfresco_distribution() {
+    log_step "Extracting Governance distribution..."
+
+    local dist_file
+    dist_file=$(find "$DOWNLOAD_DIR" -name "alfresco-governance-services-community-distribution-*.zip" | head -1)
+
+    if [ -z "$dist_file" ] || [ ! -f "$dist_file" ]; then
+        log_error "Alfresco Governance distribution not found in $DOWNLOAD_DIR"
+        exit 1
+    fi
+
+    # Create a unique, user-owned temp directory to avoid sudo ownership problems
+    TEMP_DIR="$(mktemp -d -t alfresco-install-XXXXXX)"
+    log_info "Using temp directory: $TEMP_DIR"
+
+    log_info "Extracting $(basename "$dist_file")..."
+    unzip -q "$dist_file" -d "$TEMP_DIR"
+
+    # Find the extracted directory (may have version in name)
+    ALFRESCO_DIST_DIR=$(find "$TEMP_DIR" -maxdepth 1 -type d -name "alfresco-content-*" | head -1)
+
+    if [ -z "$ALFRESCO_DIST_DIR" ]; then
+        # Files might be directly in TEMP_DIR
+        ALFRESCO_DIST_DIR="$TEMP_DIR"
+    fi
+
+    log_info "Distribution extracted to: $ALFRESCO_DIST_DIR"
+}
 
 # -----------------------------------------------------------------------------
 # Verify Downloads
